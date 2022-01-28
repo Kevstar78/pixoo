@@ -110,7 +110,10 @@ class Pixoo:
         self.draw_filled_rectangle((top_left_x, top_left_y), (bottom_right_x, bottom_right_y), (r, g, b))
 
     def draw_image(self, image_path, xy=(0, 0), image_resample_mode=ImageResampleMode.PIXEL_ART, pad_resample=False):
-        image = Image.open(image_path)
+        if Image.isImageType(image_path):
+            image = image_path
+        else:
+            image = Image.open(image_path)
         size = image.size
         width = size[0]
         height = size[1]
