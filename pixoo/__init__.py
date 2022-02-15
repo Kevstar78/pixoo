@@ -62,6 +62,7 @@ class Pixoo:
     __buffer = []
     __buffers_send = 0
     __counter = 0
+    __display_list = []
 
     def __init__(self, address, size=64, debug=False):
         assert size in [16, 32, 64], 'Invalid screen size in pixels given. Valid options are 16, 32, and 64'
@@ -82,11 +83,46 @@ class Pixoo:
         # Retrieve the counter
         self.__load_counter()
 
+    def add_display_item(self, text='', xy=(0, 0), color=Palette.WHITE, identifier=1, font=2, width=64,
+                         movement_speed=0, direction=TextScrollDirection.LEFT, align=1,
+                         height=16, display_type=22, url_time=None):
+
+        identifier = clamp(identifier, 0, 39)
+
+        text_properties = {
+            'TextId': identifier,
+            'type': display_type,
+            'x': xy[0],
+            'y': xy[1],
+            'dir': direction,
+            'font': font,
+            'TextWidth': width,
+            'TextHeight': height,
+            'speed': movement_speed,
+            'color': rgb_to_hex_color(color),
+            'align': align
+            }
+
+        if text != '':
+            text_properties['TextString'] = text
+        if url_time != None:
+            text_properties['UrlTime'] = url_time
+
+        self.__display_list.append(text_properties)
+
     def clear(self, rgb=Palette.BLACK):
         self.fill(rgb)
 
+    def clear_display_list(self):
+        self.__display_list = []
+
     def clear_rgb(self, r, g, b):
         self.fill_rgb(r, g, b)
+
+    def clear_text(self):
+        self.__send_request({
+            'Command' : 'Draw/ClearHttpText'
+        })
 
     def draw_character(self, character, xy=(0, 0), rgb=Palette.WHITE):
         matrix = retrieve_glyph(character)
@@ -226,12 +262,50 @@ class Pixoo:
     def fill_rgb(self, r, g, b):
         self.fill((r, g, b))
 
-    def push(self):
+    def get_current_channel(self):
+        response = requests.post(self.__url, json.dumps({
+            'Command': 'Channel/GetIndex'
+            }))
+        print(response.json())
+
+    def push(self, reload_counter=False):
+        if reload_counter:
+            self.reload_counter()
         self.__send_buffer()
+
+    def reload_counter(self):
+        self.__load_counter()
+
+    def reset_counter(self):
+        response = requests.post(self.__url, '{"Command": "Draw/ResetHttpGifId"}')
+        data = response.json()
+        if data['error_code'] != 0:
+            self.__error(data)
+        else:
+            self.__counter = 1
+            if self.debug:
+                print('[.] Counter reset and stored: ' + str(self.__counter))
+
+    def send_animation(self, pic_list, pic_speed=1000, reload_counter=False):
+        if reload_counter:
+            self.reload_counter()
+        pic_num = len(pic_list)
+        update_counter = True
+        for pic_offset, pic in enumerate(pic_list):
+            self.draw_image(pic)
+            self.__send_buffer(pic_num, pic_offset, pic_speed, update_counter)
+            update_counter = False
+
+    def send_display_list(self):
+        request = {
+            'Command' : 'Draw/SendHttpItemList',
+            'ItemList' : self.__display_list
+        }
+        self.__send_request(request)
 
     def send_text(self, text, xy=(0, 0), color=Palette.WHITE, identifier=1, font=2, width=64,
                   movement_speed=0,
-                  direction=TextScrollDirection.LEFT):
+                  direction=TextScrollDirection.LEFT, align=1):
 
         # Make sure the identifier is valid
         identifier = clamp(identifier, 0, 19)
@@ -246,7 +320,8 @@ class Pixoo:
             'TextWidth': width,
             'speed': movement_speed,
             'TextString': text,
-            'color': rgb_to_hex_color(color)
+            'color': rgb_to_hex_color(color),
+            'align': align
         }))
 
         data = response.json()
@@ -281,8 +356,35 @@ class Pixoo:
         if data['error_code'] != 0:
             self.__error(data)
 
+    def set_countdown(self, status=1, minutes=1, seconds=1):
+        self.__send_request({
+            'Command': 'Tools/SetTimer',
+            'Minute' : minutes,
+            'Second' : seconds,
+            'Status' : status
+        })
+
     def set_face(self, face_id):
         self.set_clock(face_id)
+
+    def set_screen_switch(self, onoff):
+        self.__send_request({
+            'Command': 'Channel/OnOffScreen',
+            'OnOff': onoff
+        })
+
+    def set_scoreboard(self, blue_score=0, red_score=0):
+        self.__send_request({
+            'Command': 'Tools/SetScoreBoard',
+            'BlueScore': blue_score,
+            'RedScore': red_score
+        })
+
+    def set_stopwatch(self, status):
+        self.__send_request({
+            'Command' : 'Tools/SetStopWatch',
+            'Status' : status
+        })
 
     def set_visualizer(self, equalizer_position):
         response = requests.post(self.__url, json.dumps({
@@ -311,23 +413,24 @@ class Pixoo:
             if self.debug:
                 print('[.] Counter loaded and stored: ' + str(self.__counter))
 
-    def __send_buffer(self):
+    def __send_buffer(self, pic_num=1, pic_offset=0, pic_speed=1000, update_counter=True):
         # Encode the buffer to base64 encoding
         base64_bytes = base64.b64encode(bytearray(self.__buffer))
 
         # Add to the internal counter
-        self.__counter = self.__counter + 1
+        if update_counter:
+            self.__counter = self.__counter + 1
 
         if self.debug:
             print(f'[.] Counter set to {self.__counter}')
 
         response = requests.post(self.__url, json.dumps({
             'Command': 'Draw/SendHttpGif',
-            'PicNum': 1,
+            'PicNum': pic_num,
             'PicWidth': self.size,
-            'PicOffset': 0,
+            'PicOffset': pic_offset,
             'PicID': self.__counter,
-            'PicSpeed': 1000,
+            'PicSpeed': pic_speed,
             'PicData': str(base64_bytes.decode())
         }))
         data = response.json()
@@ -338,6 +441,12 @@ class Pixoo:
 
             if self.debug:
                 print(f'[.] Pushed {self.__buffers_send} buffers')
+
+    def __send_request(self, request_dict):
+        response = requests.post(self.__url, json.dumps(request_dict))
+        data = response.json()
+        if data['error_code'] != 0:
+            self.__error(data)
 
 
 __all__ = (Channel, ImageResampleMode, Pixoo, TextScrollDirection)

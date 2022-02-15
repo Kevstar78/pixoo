@@ -45,8 +45,14 @@ Supported characters so far are:
 0123456789
 abcdefghijklmnopqrstuvwxyz
 ABCDEFGHIJKLMNOPQRSTUVWXYZ
-!'()+,-<=>?[]^_:./{|}~$@%
+!'()+,-<=>?[]^_:./{|}~$@%°
 ```
+
+## Additional Resources
+
+### Pixoo API documentation
+
+The Pixoo API is still under development by Divoom. The documentation can be found here: http://doc.divoom-gz.com/web/#/12
 
 ## Known bugs
 
