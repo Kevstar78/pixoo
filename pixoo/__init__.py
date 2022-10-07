@@ -39,6 +39,14 @@ def rgb_to_hex_color(rgb):
 
 def round_location(xy):
     return round(xy[0]), round(xy[1])
+    
+    
+def discover_wifi_devices():
+    response = requests.post("https://app.divoom-gz.com/Device/ReturnSameLANDevice")
+    data = response.json()
+    if data['ReturnCode'] != 0:
+        print(data)
+    return data
 
 
 class Channel(IntEnum):
@@ -82,6 +90,9 @@ class Pixoo:
 
         # Retrieve the counter
         self.__load_counter()
+        
+        # Retrieve current device configuration
+        self.device_config = self.__get_config()
 
     def add_display_item(self, text='', xy=(0, 0), color=Palette.WHITE, identifier=1, font=2, width=64,
                          movement_speed=0, direction=TextScrollDirection.LEFT, align=1,
@@ -263,7 +274,7 @@ class Pixoo:
         response = requests.post(self.__url, json.dumps({
             'Command': 'Channel/GetIndex'
             }))
-        print(response.json())
+        return response.json()
 
     def push(self, reload_counter=False):
         if reload_counter:
@@ -391,6 +402,15 @@ class Pixoo:
         data = response.json()
         if data['error_code'] != 0:
             self.__error(data)
+            
+    def turn_on(self):
+        self.set_screen_switch(1)
+        
+    def turn_off(self):
+        self.set_screen_switch(0)
+
+    def update_config(self):
+        self.device_config = self.__get_config()
 
     def __clamp_location(self, xy):
         return clamp(xy[0], 0, self.size - 1), clamp(xy[1], 0, self.size - 1)
@@ -400,6 +420,12 @@ class Pixoo:
             print('[x] Error on request ' + str(self.__counter))
             print(error)
 
+    def __get_config(self):
+        response = requests.post(self.__url, json.dumps({
+            'Command': 'Channel/GetAllConf'
+        }))
+        return response.json()
+ 
     def __load_counter(self):
         response = requests.post(self.__url, '{"Command": "Draw/GetHttpGifId"}')
         data = response.json()
