@@ -303,12 +303,15 @@ class Pixoo:
             self.__send_buffer(pic_num, pic_offset, pic_speed, update_counter)
             update_counter = False
 
-    def send_display_list(self):
+    def send_display_list(self, clear_list=True):
         request = {
             'Command' : 'Draw/SendHttpItemList',
             'ItemList' : self.__display_list
         }
         self.__send_request(request)
+
+        if clear_list:
+            self.__display_list = []
 
     def send_text(self, text, xy=(0, 0), color=Palette.WHITE, identifier=1, font=2, width=64,
                   movement_speed=0,
