@@ -8,6 +8,7 @@ import time
 from ._colors import Palette
 from ._font import retrieve_glyph
 from .helpers import url_image_handle
+from .simulator import Simulator, SimulatorConfig
 
 
 def clamp(value, minimum=0, maximum=255):
@@ -66,13 +67,20 @@ class Pixoo:
     __buffers_send = 0
     __counter = 0
     __display_list = []
+    __refresh_counter_limit = 32
+    __simulator = None
 
-    def __init__(self, address, size=64, debug=False):
-        assert size in [16, 32, 64], 'Invalid screen size in pixels given. Valid options are 16, 32, and 64'
+    def __init__(self, address, size=64, debug=False, refresh_connection_automatically=True, simulated=False,
+                 simulation_config=SimulatorConfig()):
+        assert size in [16, 32, 64], \
+            'Invalid screen size in pixels given. ' \
+            'Valid options are 16, 32, and 64'
 
+        self.refresh_connection_automatically = refresh_connection_automatically
         self.address = address
         self.debug = debug
         self.size = size
+        self.simulated = simulated
 
         # Total number of pixels
         self.pixel_count = self.size * self.size
@@ -92,6 +100,14 @@ class Pixoo:
         # Default values for Scoreboard
         self.blue_score = 0
         self.red_score = 0
+
+        # Resetting if needed
+        if self.refresh_connection_automatically and self.__counter > self.__refresh_counter_limit:
+            self.__reset_counter()
+
+        # We're going to need a simulator
+        if self.simulated:
+            self.__simulator = Simulator(self, simulation_config)
 
     def add_display_item(self, text='', xy=(0, 0), color=Palette.WHITE, identifier=1, font=2, width=64,
                          movement_speed=0, direction=TextScrollDirection.LEFT, align=1,
@@ -143,20 +159,31 @@ class Pixoo:
                     local_y = int(index / 3)
                     self.draw_pixel((xy[0] + local_x, xy[1] + local_y), rgb)
 
-    def draw_character_at_location_rgb(self, character, x=0, y=0, r=255, g=255, b=255):
+    def draw_character_at_location_rgb(self, character, x=0, y=0, r=255, g=255,
+                                       b=255):
         self.draw_character(character, (x, y), (r, g, b))
 
-    def draw_filled_rectangle(self, top_left_xy=(0, 0), bottom_right_xy=(1, 1), rgb=Palette.BLACK):
+    def draw_filled_rectangle(self, top_left_xy=(0, 0), bottom_right_xy=(1, 1),
+                              rgb=Palette.BLACK):
         for y in range(top_left_xy[1], bottom_right_xy[1] + 1):
             for x in range(top_left_xy[0], bottom_right_xy[0] + 1):
                 self.draw_pixel((x, y), rgb)
 
-    def draw_filled_rectangle_from_top_left_to_bottom_right_rgb(self, top_left_x=0, top_left_y=0, bottom_right_x=1,
-                                                                bottom_right_y=1, r=0, g=0, b=0):
-        self.draw_filled_rectangle((top_left_x, top_left_y), (bottom_right_x, bottom_right_y), (r, g, b))
+    def draw_filled_rectangle_from_top_left_to_bottom_right_rgb(self,
+                                                                top_left_x=0,
+                                                                top_left_y=0,
+                                                                bottom_right_x=1,
+                                                                bottom_right_y=1,
+                                                                r=0, g=0, b=0):
+        self.draw_filled_rectangle((top_left_x, top_left_y),
+                                   (bottom_right_x, bottom_right_y), (r, g, b))
 
-    def draw_image(self, image_path_or_object, xy=(0, 0), image_resample_mode=ImageResampleMode.PIXEL_ART, pad_resample=False):
-        image = image_path_or_object if isinstance(image_path_or_object, Image.Image) else Image.open(image_path_or_object)
+    def draw_image(self, image_path_or_object, xy=(0, 0),
+                   image_resample_mode=ImageResampleMode.PIXEL_ART,
+                   pad_resample=False):
+        image = image_path_or_object if isinstance(image_path_or_object,
+                                                   Image.Image) else Image.open(
+            image_path_or_object)
         size = image.size
         width = size[0]
         height = size[1]
@@ -164,7 +191,8 @@ class Pixoo:
         # See if it needs to be scaled/resized to fit the display
         if width > self.size or height > self.size:
             if pad_resample:
-                image = ImageOps.pad(image, (self.size, self.size), image_resample_mode)
+                image = ImageOps.pad(image, (self.size, self.size),
+                                     image_resample_mode)
             else:
                 image.thumbnail((self.size, self.size), image_resample_mode)
 
@@ -188,9 +216,11 @@ class Pixoo:
                 if self.size - 1 < placed_y or placed_y < 0:
                     continue
 
-                self.draw_pixel((placed_x, placed_y), rgb_image.getpixel(location))
+                self.draw_pixel((placed_x, placed_y),
+                                rgb_image.getpixel(location))
 
-    def draw_image_at_location(self, image_path_or_object, x, y, image_resample_mode=ImageResampleMode.PIXEL_ART):
+    def draw_image_at_location(self, image_path_or_object, x, y,
+                               image_resample_mode=ImageResampleMode.PIXEL_ART):
         self.draw_image(image_path_or_object, (x, y), image_resample_mode)
 
     def draw_line(self, start_xy, stop_xy, rgb=Palette.WHITE):
@@ -207,13 +237,15 @@ class Pixoo:
                 interpolant = step / amount_of_steps
 
             # Add a pixel as a rounded location
-            line.add(round_location(lerp_location(start_xy, stop_xy, interpolant)))
+            line.add(
+                round_location(lerp_location(start_xy, stop_xy, interpolant)))
 
         # Draw the actual pixel line
         for pixel in line:
             self.draw_pixel(pixel, rgb)
 
-    def draw_line_from_start_to_stop_rgb(self, start_x, start_y, stop_x, stop_y, r=255, g=255, b=255):
+    def draw_line_from_start_to_stop_rgb(self, start_x, start_y, stop_x, stop_y,
+                                         r=255, g=255, b=255):
         self.draw_line((start_x, start_y), (stop_x, stop_y), (r, g, b))
 
     def draw_pixel(self, xy, rgb):
@@ -221,7 +253,8 @@ class Pixoo:
         if xy[0] < 0 or xy[0] >= self.size or xy[1] < 0 or xy[1] >= self.size:
             if self.debug:
                 limit = self.size - 1
-                print(f'[!] Invalid coordinates given: ({xy[0]}, {xy[1]}) (maximum coordinates are ({limit}, {limit})')
+                print(
+                    f'[!] Invalid coordinates given: ({xy[0]}, {xy[1]}) (maximum coordinates are ({limit}, {limit})')
             return
 
         # Calculate the index
@@ -283,16 +316,6 @@ class Pixoo:
     def reload_counter(self):
         self.__load_counter()
 
-    def reset_counter(self):
-        response = requests.post(self.__url, '{"Command": "Draw/ResetHttpGifId"}')
-        data = response.json()
-        if data['error_code'] != 0:
-            self.__error(data)
-        else:
-            self.__counter = 1
-            if self.debug:
-                print('[.] Counter reset and stored: ' + str(self.__counter))
-
     def send_animation(self, pic_list, pic_speed=1000, reload_counter=False):
         if reload_counter:
             self.reload_counter()
@@ -317,6 +340,10 @@ class Pixoo:
                   movement_speed=0,
                   direction=TextScrollDirection.LEFT, align=1):
 
+        # This won't be possible
+        if self.simulated:
+            return
+
         # Make sure the identifier is valid
         identifier = clamp(identifier, 0, 19)
 
@@ -339,6 +366,10 @@ class Pixoo:
             self.__error(data)
 
     def set_brightness(self, brightness):
+        # This won't be possible
+        if self.simulated:
+            return
+
         brightness = clamp(brightness, 0, 100)
         response = requests.post(self.__url, json.dumps({
             'Command': 'Channel/SetBrightness',
@@ -349,6 +380,10 @@ class Pixoo:
             self.__error(data)
 
     def set_channel(self, channel):
+        # This won't be possible
+        if self.simulated:
+            return
+
         response = requests.post(self.__url, json.dumps({
             'Command': 'Channel/SetIndex',
             'SelectIndex': int(channel)
@@ -358,6 +393,10 @@ class Pixoo:
             self.__error(data)
 
     def set_clock(self, clock_id):
+        # This won't be possible
+        if self.simulated:
+            return
+
         response = requests.post(self.__url, json.dumps({
             'Command': 'Channel/SetClockSelectId',
             'ClockId': clock_id
@@ -389,12 +428,6 @@ class Pixoo:
     def set_face(self, face_id):
         self.set_clock(face_id)
 
-    def set_screen_switch(self, onoff):
-        self.__send_request({
-            'Command': 'Channel/OnOffScreen',
-            'OnOff': onoff
-        })
-
     def set_scoreboard(self, blue_score=0, red_score=0):
         self.blue_score = blue_score
         self.red_score = red_score
@@ -409,8 +442,29 @@ class Pixoo:
             'Command' : 'Tools/SetStopWatch',
             'Status' : status
         })
+    def set_screen(self, on=True):
+        # This won't be possible
+        if self.simulated:
+            return
+
+        response = requests.post(self.__url, json.dumps({
+            'Command': 'Channel/OnOffScreen',
+            'OnOff': 1 if on else 0
+        }))
+        data = response.json()
+        if data['error_code'] != 0:
+            self.__error(data)
+
+    def set_screen_off(self):
+        self.set_screen(False)
+
+    def set_screen_on(self):
+        self.set_screen(True)
 
     def set_visualizer(self, equalizer_position):
+        # This won't be possible
+        if self.simulated:
+            return
         response = requests.post(self.__url, json.dumps({
             'Command': 'Channel/SetEqPosition',
             'EqPosition': equalizer_position
@@ -499,6 +553,11 @@ class Pixoo:
         return response.json()
  
     def __load_counter(self):
+        # Just assume it's starting at the beginning if we're simulating
+        if self.simulated:
+            self.__counter = 1
+            return
+
         response = requests.post(self.__url, '{"Command": "Draw/GetHttpGifId"}')
         data = response.json()
         if data['error_code'] != 0:
@@ -509,16 +568,27 @@ class Pixoo:
                 print('[.] Counter loaded and stored: ' + str(self.__counter))
 
     def __send_buffer(self, pic_num=1, pic_offset=0, pic_speed=1000, update_counter=True):
-        # Encode the buffer to base64 encoding
-        base64_bytes = base64.b64encode(bytearray(self.__buffer))
-
         # Add to the internal counter
         if update_counter:
             self.__counter = self.__counter + 1
 
+        # Check if we've passed the limit and reset the counter for the animation remotely
+        if self.refresh_connection_automatically and self.__counter >= self.__refresh_counter_limit:
+            self.__reset_counter()
+            self.__counter = 1
+
         if self.debug:
             print(f'[.] Counter set to {self.__counter}')
 
+        # If it's simulated, we don't need to actually push it to the divoom
+        if self.simulated:
+            self.__simulator.display(self.__buffer, self.__counter)
+
+            # Simulate this too I suppose
+            self.__buffers_send = self.__buffers_send + 1
+            return
+
+        # Encode the buffer to base64 encoding
         response = requests.post(self.__url, json.dumps({
             'Command': 'Draw/SendHttpGif',
             'PicNum': pic_num,
@@ -526,7 +596,7 @@ class Pixoo:
             'PicOffset': pic_offset,
             'PicID': self.__counter,
             'PicSpeed': pic_speed,
-            'PicData': str(base64_bytes.decode())
+            'PicData': str(base64.b64encode(bytearray(self.__buffer)).decode())
         }))
         data = response.json()
         if data['error_code'] != 0:
@@ -539,6 +609,18 @@ class Pixoo:
 
     def __send_request(self, request_dict):
         response = requests.post(self.__url, json.dumps(request_dict))
+
+    def __reset_counter(self):
+        if self.debug:
+            print(f'[.] Resetting counter remotely')
+
+        # This won't be possible
+        if self.simulated:
+            return
+
+        response = requests.post(self.__url, json.dumps({
+            'Command': 'Draw/ResetHttpGifId'
+        }))
         data = response.json()
         if data['error_code'] != 0:
             self.__error(data)
