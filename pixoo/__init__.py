@@ -55,7 +55,7 @@ class Channel(IntEnum):
 
 class ImageResampleMode(IntEnum):
     PIXEL_ART = Image.NEAREST
-    SMOOTH = Image.ANTIALIAS
+    SMOOTH = Image.LANCZOS
 
 
 class TextScrollDirection(IntEnum):
@@ -451,7 +451,10 @@ class Pixoo:
             'Command': 'Channel/SetIndex',
             'SelectIndex': int(channel)
         }, gather_command)
-
+        data = response.json()
+        if data['error_code'] != 0:
+            self.__error(data)
+        
     def set_clock(self, clock_id, gather_command=False):
         # This won't be possible
         if self.simulated:
@@ -484,16 +487,20 @@ class Pixoo:
             'Status' : status
         }, gather_command)
 
-    def set_custom_page(self, custom_page_index, gather_command=False):
+    def set_custom_page(self, index, gather_command=False):
         # This won't be possible
         if self.simulated:
             return
 
         self.__send_request({
             'Command': 'Channel/SetCustomPageIndex',
-            'CustomPageIndex': custom_page_index
+            'CustomPageIndex': index
         }, gather_command)
 
+    def set_custom_channel(self, index, gather_command=False)):
+        self.set_custom_page(index)
+        self.set_channel(3)
+        
     def set_face(self, face_id, gather_command=False):
         self.set_clock(face_id, gather_command)
 
